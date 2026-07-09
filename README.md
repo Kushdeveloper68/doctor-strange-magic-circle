@@ -19,7 +19,7 @@ Pure Python. No Unity, no game engine, no green-screen tricks — just OpenCV, M
   Suggested: record a 5-10s clip of the circle + portal + a swipe spell,
   convert to GIF, drop it in a /docs or /media folder, and update the path.
 -->
-<img src="./docs/re-1.gif" alt="Doctor Strange Magic Circle demo" width="720">
+<img src="./docs/re-1.gif" alt="Doctor Strange Magic Circle demo" width="720" autoplay>
 
 
 </div>
@@ -122,7 +122,7 @@ If you're curious how any specific effect works (the bloom, the rune generation,
 
 ## 📸 Demo / Screenshots
 
-> Add screenshots or a GIF here once you've recorded one. Suggested layout:
+
 
 <p align="center">
   <img src="docs/s3.png" width="32%">
