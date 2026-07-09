@@ -19,9 +19,8 @@ Pure Python. No Unity, no game engine, no green-screen tricks — just OpenCV, M
   Suggested: record a 5-10s clip of the circle + portal + a swipe spell,
   convert to GIF, drop it in a /docs or /media folder, and update the path.
 -->
-<img src="docs/demo.gif" alt="Doctor Strange Magic Circle demo" width="720">
+<img src="./docs/re-1.gif" alt="Doctor Strange Magic Circle demo" width="720">
 
-*(Add your own demo GIF here — see [Recording a demo](#-recording-a-demo) below)*
 
 </div>
 
@@ -125,20 +124,13 @@ If you're curious how any specific effect works (the bloom, the rune generation,
 
 > Add screenshots or a GIF here once you've recorded one. Suggested layout:
 
-```markdown
 <p align="center">
-  <img src="docs/circle.png" width="32%">
-  <img src="docs/portal.png" width="32%">
-  <img src="docs/spell.png" width="32%">
+  <img src="docs/s3.png" width="32%">
+  <img src="docs/s4.png" width="32%">
+  <img src="docs/s5.png" width="32%">
 </p>
-```
 
-### Recording a demo
-Press **`V`** while the app is running to start/stop an MP4 recording (saved to `captures/`), or **`C`** to grab a screenshot. Trim a good clip and convert to GIF, e.g.:
 
-```bash
-ffmpeg -i captures/recording_XXXX.mp4 -vf "fps=15,scale=720:-1" -loop 0 docs/demo.gif
-```
 
 ---
 
