@@ -152,8 +152,8 @@ ffmpeg -i captures/recording_XXXX.mp4 -vf "fps=15,scale=720:-1" -loop 0 docs/dem
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/<your-username>/<your-repo-name>.git
-cd <your-repo-name>
+git clone https://github.com/Kushdeveloper68/doctor-strange-magic-circle.git
+cd doctor-strange-magic-circle
 
 # 2. Create & activate a virtual environment
 python3 -m venv venv
