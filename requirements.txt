@@ -1,0 +1,11 @@
+# Doctor Strange Magic Circle - dependencies
+# Tested with Python 3.12
+#
+# IMPORTANT: mediapipe removed its legacy `mediapipe.solutions` API (used by
+# this project for Hands landmark detection) starting with newer releases.
+# Pin to a version range that still ships `mediapipe.solutions.hands`.
+# 0.10.9 - 0.10.21 are known-good; do not blindly upgrade past this range.
+
+opencv-python>=4.9.0
+mediapipe>=0.10.9,<=0.10.21
+numpy>=1.24.0,<2.0.0
