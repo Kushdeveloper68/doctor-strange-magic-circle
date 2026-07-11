@@ -71,6 +71,7 @@ No markers, no gloves, no green screen. Just your hands and a camera.
   | 🙌 Two open hands | Spawns a swirling portal between them |
   | ↔️ Hands apart / together | Grows / shrinks the portal |
   | 👋 Swipe | Fires the currently selected spell |
+  | ⭕ Draw a circle in the air with your index finger | Opens a **Sling Ring portal** at that spot — it then follows your fingertip as you move your hand, just like carrying the portal around. Draw another circle (or make a fist) to close it. |
 
 - **Particle system** — fire sparks off the ring edges, floating embers, hand-motion energy trails, fade-over-life.
 - **Cinematic visual effects** — additive-blend glow layer + real Gaussian bloom pass, motion-blur via frame persistence, orange/red/gold color grading.
@@ -193,6 +194,7 @@ A window titled **"Doctor Strange Magic Circle"** opens showing your mirrored we
 - **Twist wrist** → circle rotates to match
 - **Both hands open** → portal appears between them; move hands apart/together to resize
 - **Swipe** an open hand → fires the currently selected spell from that position
+- **Trace a circle in the air** with your index finger (either hand) → a portal opens right there and follows your finger as you move it around — trace another circle on that same hand, or close it into a fist, to dismiss it
 
 ---
 
