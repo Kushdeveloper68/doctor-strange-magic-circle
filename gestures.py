@@ -20,7 +20,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional, Tuple
 
-from config import GestureConfig
+import numpy as np
+
+from config import GestureConfig, CircleTraceConfig
 from hand_tracker import (
     Hand,
     WRIST,
@@ -118,12 +120,28 @@ class SwipeEvent:
 
 
 @dataclass
+class CircleEvent:
+    """Fired when a hand's index fingertip traces a full loop in the air -
+    the 'Sling Ring' gesture that opens a portal at that location."""
+
+    hand_key: str
+    center: Tuple[float, float]
+    radius: float
+    timestamp: float
+
+
+@dataclass
 class _HandHistory:
     positions: Deque[Tuple[float, float, float]] = field(
         default_factory=lambda: deque(maxlen=12)
     )  # (x, y, t)
     last_angle: Optional[float] = None
     last_swipe_time: float = 0.0
+    # separate, longer-lived buffer just for fingertip circle-tracing
+    fingertip_trace: Deque[Tuple[float, float, float]] = field(
+        default_factory=lambda: deque(maxlen=90)
+    )  # (x, y, t)
+    last_circle_time: float = 0.0
 
 
 @dataclass
@@ -143,24 +161,29 @@ class HandGestureState:
 class GestureRecognizer:
     """Stateful gesture recognizer. Call `update(hands)` once per frame."""
 
-    def __init__(self, cfg: GestureConfig):
+    def __init__(self, cfg: GestureConfig, circle_cfg: Optional[CircleTraceConfig] = None):
         self.cfg = cfg
+        self.circle_cfg = circle_cfg or CircleTraceConfig()
         self._history: Dict[str, _HandHistory] = {}
         self._prev_portal_distance: Optional[float] = None
 
     def update(
         self, hands: List[Hand]
-    ) -> Tuple[Dict[str, HandGestureState], List[SwipeEvent], Optional[float]]:
+    ) -> Tuple[Dict[str, HandGestureState], List[SwipeEvent], Optional[float], List[CircleEvent]]:
         """
         Returns:
             per_hand: dict keyed by "Left"/"Right" (or "Left_1" if dupes)
             swipes: list of SwipeEvent detected this frame
             portal_distance_delta: change in inter-hand distance if two
                 hands are present (positive = moving apart), else None.
+            circle_events: list of CircleEvent - fired when a hand just
+                finished tracing a full loop with its index fingertip
+                (the "open a portal here" gesture).
         """
         now = time.time()
         per_hand: Dict[str, HandGestureState] = {}
         swipes: List[SwipeEvent] = []
+        circle_events: List[CircleEvent] = []
         active_keys = set()
 
         for i, hand in enumerate(hands):
@@ -170,6 +193,9 @@ class GestureRecognizer:
 
             cx, cy = hand.center
             hist.positions.append((cx, cy, now))
+
+            fx, fy = hand.point(INDEX_TIP)
+            hist.fingertip_trace.append((fx, fy, now))
 
             angle = wrist_orientation_angle(hand)
             rot_delta = 0.0
@@ -193,6 +219,10 @@ class GestureRecognizer:
             if swipe is not None:
                 swipes.append(swipe)
 
+            circle_ev = self._detect_circle(key, hist, now)
+            if circle_ev is not None:
+                circle_events.append(circle_ev)
+
         # forget hands no longer visible
         for stale_key in list(self._history.keys()):
             if stale_key not in active_keys:
@@ -210,7 +240,57 @@ class GestureRecognizer:
         else:
             self._prev_portal_distance = None
 
-        return per_hand, swipes, portal_delta
+        return per_hand, swipes, portal_delta, circle_events
+
+    def _detect_circle(self, key: str, hist: _HandHistory, now: float) -> Optional[CircleEvent]:
+        """Check whether this hand's index fingertip has just traced a
+        full loop in the air. Geometry: unwrap the angle of each traced
+        point around the path's own centroid; a genuine circle sweeps a
+        large, mostly one-directional total angle while staying at a
+        roughly constant radius from that centroid and closing back near
+        its own start point.
+        """
+        cfg = self.circle_cfg
+        if now - hist.last_circle_time < cfg.cooldown_seconds:
+            return None
+
+        window_start = now - cfg.history_duration
+        pts = [(x, y, t) for (x, y, t) in hist.fingertip_trace if t >= window_start]
+        if len(pts) < cfg.min_points:
+            return None
+
+        xs = np.array([p[0] for p in pts], dtype=np.float64)
+        ys = np.array([p[1] for p in pts], dtype=np.float64)
+        cx, cy = float(xs.mean()), float(ys.mean())
+
+        dx, dy = xs - cx, ys - cy
+        radii = np.hypot(dx, dy)
+        mean_r = float(radii.mean())
+        if mean_r < cfg.min_radius_px or mean_r > cfg.max_radius_px:
+            return None
+
+        r_variation = float(radii.std() / (mean_r + 1e-6))
+        if r_variation > cfg.max_radius_variation_ratio:
+            return None
+
+        angles = np.unwrap(np.arctan2(dy, dx))
+        total_swept_deg = math.degrees(float(np.sum(np.abs(np.diff(angles)))))
+        if total_swept_deg < cfg.min_total_angle_deg:
+            return None
+
+        net_deg = math.degrees(abs(float(angles[-1] - angles[0])))
+        if net_deg / (total_swept_deg + 1e-6) < cfg.min_direction_consistency:
+            return None  # too much back-and-forth wobble; not a clean loop
+
+        start_pt = np.array([pts[0][0], pts[0][1]])
+        end_pt = np.array([pts[-1][0], pts[-1][1]])
+        closure_dist = float(np.linalg.norm(end_pt - start_pt))
+        if closure_dist > mean_r * cfg.max_closure_ratio:
+            return None  # path never actually came back around
+
+        hist.last_circle_time = now
+        hist.fingertip_trace.clear()
+        return CircleEvent(hand_key=key, center=(cx, cy), radius=mean_r, timestamp=now)
 
     def _detect_swipe(
         self, key: str, hist: _HandHistory, now: float

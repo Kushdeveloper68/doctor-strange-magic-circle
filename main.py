@@ -25,6 +25,11 @@ Gestures
   Two open hands         -> portal effect between the hands
   Hands apart/together   -> grow/shrink the portal
   Swipe                  -> fire the selected spell
+  Draw a circle in the air with your index finger (either hand)
+                          -> opens a "Sling Ring" portal at that spot,
+                             which then follows your fingertip around.
+                             Draw another circle, or make a fist, to
+                             close it.
 """
 from __future__ import annotations
 
@@ -37,8 +42,8 @@ import cv2
 import numpy as np
 
 from config import CONFIG, AppConfig
-from hand_tracker import HandTracker, Hand, draw_debug_landmarks
-from gestures import GestureRecognizer, HandGestureState, SwipeEvent
+from hand_tracker import HandTracker, Hand, draw_debug_landmarks, INDEX_TIP
+from gestures import GestureRecognizer, HandGestureState, SwipeEvent, CircleEvent
 from magic_circle import MagicCircle
 from particles import ParticleSystem
 import effects
@@ -74,11 +79,14 @@ class DoctorStrangeApp:
     def __init__(self, cfg: AppConfig):
         self.cfg = cfg
         self.tracker = HandTracker(cfg.tracking)
-        self.gestures = GestureRecognizer(cfg.gesture)
+        self.gestures = GestureRecognizer(cfg.gesture, cfg.circle_trace)
         self.particles = ParticleSystem(cfg.particles)
 
         self.circles: Dict[str, MagicCircle] = {}
         self.portal: Optional[effects.Portal] = None
+        # portals opened by tracing a circle with an index fingertip,
+        # keyed by hand_key so each hand can carry at most one.
+        self.traced_portals: Dict[str, effects.Portal] = {}
         self.projectiles: List[effects.Projectile] = []
         self.lightning_bolts: List[effects.LightningBolt] = []
         self.beams: List[effects.EnergyBeam] = []
@@ -153,7 +161,8 @@ class DoctorStrangeApp:
     def _process_frame(self, frame: np.ndarray, dt: float) -> np.ndarray:
         h, w = frame.shape[:2]
         hands = self.tracker.process(frame)
-        per_hand, swipes, portal_delta = self.gestures.update(hands)
+        per_hand, swipes, portal_delta, circle_events = self.gestures.update(hands)
+        hands_by_key = {f"{hand.handedness}_{i}": hand for i, hand in enumerate(hands)}
 
         glow_layer = effects.new_glow_layer((h, w))
 
@@ -163,8 +172,8 @@ class DoctorStrangeApp:
 
         if two_open:
             self._update_portal(hands, per_hand, dt, portal_delta)
-            # while portal is active, personal circles are suppressed so the
-            # two effects don't visually compete.
+            # while the two-hand portal is active, personal circles are
+            # suppressed so the two effects don't visually compete.
             for c in self.circles.values():
                 c.deactivate()
         else:
@@ -172,6 +181,8 @@ class DoctorStrangeApp:
             self._update_circles(hands, per_hand, dt)
 
         self._handle_swipes(swipes, hands, per_hand)
+        self._handle_circle_events(circle_events)
+        self._update_traced_portals(hands_by_key, per_hand, dt)
         self._update_spells(dt)
         self._spawn_ambient_particles(hands, per_hand, dt)
         self.particles.update(dt)
@@ -183,6 +194,8 @@ class DoctorStrangeApp:
                     circle.draw(glow_layer)
         if self.portal is not None:
             self.portal.draw(glow_layer)
+        for tp in self.traced_portals.values():
+            tp.draw(glow_layer)
         for p in self.projectiles:
             p.draw(glow_layer)
         for b in self.lightning_bolts:
@@ -279,6 +292,65 @@ class DoctorStrangeApp:
         self.portal.update(dt, spell_cfg.portal_ring_speed_deg)
 
     # ------------------------------------------------------------------ #
+    # Finger-drawn "Sling Ring" portals
+    # ------------------------------------------------------------------ #
+    def _handle_circle_events(self, circle_events: List[CircleEvent]) -> None:
+        """A hand just finished tracing a loop with its index finger.
+        First trace on a given hand opens a portal there; tracing again
+        on a hand that already has one open acts as a toggle and closes
+        it (mirrors how re-drawing feels natural rather than stacking
+        portals on the same hand).
+        """
+        for ev in circle_events:
+            existing = self.traced_portals.get(ev.hand_key)
+            if existing is not None and existing.state in ("opening", "open"):
+                existing.begin_close()
+                continue
+
+            portal = effects.Portal(
+                center=ev.center,
+                radius=float(np.clip(ev.radius * 1.8, self.cfg.spell.portal_min_radius, self.cfg.spell.portal_max_radius)),
+                current_radius=1.0,
+                color_a=self.cfg.circle.color_core,
+                color_b=self.cfg.circle.color_spark,
+                state="opening",
+                anchor_hand_key=ev.hand_key,
+            )
+            self.traced_portals[ev.hand_key] = portal
+            # a little burst of sparks at the moment of opening sells the effect
+            self.particles.spawn_spark(ev.center, self.cfg.circle.color_spark, count=14)
+
+    def _update_traced_portals(
+        self,
+        hands_by_key: Dict[str, Hand],
+        per_hand: Dict[str, HandGestureState],
+        dt: float,
+    ) -> None:
+        cfg = self.cfg.circle_trace
+        finished_keys = []
+
+        for key, portal in self.traced_portals.items():
+            hand = hands_by_key.get(key)
+            state = per_hand.get(key)
+
+            if hand is not None:
+                # carry the portal along with the fingertip that drew it
+                fingertip = hand.point(INDEX_TIP)
+                portal.set_center(fingertip, smoothing=cfg.drag_smoothing)
+                # closing a fist on the carrying hand dismisses the portal,
+                # same as swiping a hand shut on something you're holding
+                if state is not None and state.fist:
+                    portal.begin_close()
+
+            portal.update(dt, self.cfg.spell.portal_ring_speed_deg, size_smoothing=cfg.open_close_smoothing)
+
+            if portal.is_closed():
+                finished_keys.append(key)
+
+        for key in finished_keys:
+            del self.traced_portals[key]
+
+    # ------------------------------------------------------------------ #
     # Spells triggered by swipes
     # ------------------------------------------------------------------ #
     def _handle_swipes(self, swipes: List[SwipeEvent], hands: List[Hand], per_hand: Dict[str, HandGestureState]) -> None:
@@ -347,9 +419,17 @@ class DoctorStrangeApp:
         if self.portal is not None:
             for _ in range(2):
                 angle = np.random.uniform(0, 2 * np.pi)
-                r = self.portal.radius
+                r = self.portal.current_radius
                 edge = (self.portal.center[0] + math.cos(angle) * r, self.portal.center[1] + math.sin(angle) * r)
                 self.particles.spawn_spark(edge, self.cfg.circle.color_spark, count=1)
+
+        for portal in self.traced_portals.values():
+            if portal.state not in ("opening", "open"):
+                continue
+            angle = np.random.uniform(0, 2 * np.pi)
+            r = portal.current_radius
+            edge = (portal.center[0] + math.cos(angle) * r, portal.center[1] + math.sin(angle) * r)
+            self.particles.spawn_spark(edge, self.cfg.circle.color_spark, count=1)
 
     # ------------------------------------------------------------------ #
     # UI overlay
@@ -364,7 +444,11 @@ class DoctorStrangeApp:
 
         text(f"FPS: {fps:5.1f}", 16, 28, 0.65, (120, 255, 120))
         text(f"Spell: {SPELL_NAMES[self.spell_index]}  (1/2/3 to switch)", 16, 54)
-        text(f"Magic: {'ON' if self.magic_mode else 'off'}   Portal: {'ON' if self.portal_mode else 'off'}   Debug: {'ON' if self.debug_mode else 'off'}", 16, 78)
+        active_traced = sum(1 for p in self.traced_portals.values() if p.state in ("opening", "open"))
+        portal_bit = f"Portal: {'ON' if self.portal_mode else 'off'}"
+        if active_traced:
+            portal_bit += f" (SlingRing x{active_traced})"
+        text(f"Magic: {'ON' if self.magic_mode else 'off'}   {portal_bit}   Debug: {'ON' if self.debug_mode else 'off'}", 16, 78)
 
         active_gestures = []
         for key, state in getattr(self, "_current_hand_states", {}).items():

@@ -228,23 +228,73 @@ class EnergyBeam:
 
 @dataclass
 class Portal:
-    """Swirling portal effect anchored between two hands."""
+    """Swirling portal effect. Two ways to spawn one in main.py:
+
+      * Anchored between two open hands (grows/shrinks as hands move
+        apart/together) - state stays "open" the whole time.
+      * Traced by an index fingertip drawing a circle in the air (the
+        "Sling Ring" gesture) - starts in "opening" so it visibly grows
+        in from nothing, can be dragged by updating `center` each frame
+        to follow the fingertip, and is dismissed via `begin_close()`
+        which shrinks it back out before removal.
+
+    `radius` is the *target* size; `current_radius` is what's actually
+    drawn and eases toward the target so growth/shrink/resize all read
+    as smooth animation rather than snapping.
+    """
 
     center: Tuple[float, float]
     radius: float
+    current_radius: float = 0.0
     rotation: float = 0.0
     color_a: Color = (60, 140, 255)
     color_b: Color = (200, 100, 255)
+    state: str = "open"  # "opening" | "open" | "closing" | "closed"
+    anchor_hand_key: Optional[str] = None  # which hand is carrying this portal, if any
 
-    def update(self, dt: float, speed_deg: float) -> None:
+    def __post_init__(self) -> None:
+        if self.state == "open" and self.current_radius <= 0.0:
+            self.current_radius = self.radius
+
+    def begin_close(self) -> None:
+        if self.state not in ("closing", "closed"):
+            self.state = "closing"
+
+    def is_closed(self) -> bool:
+        return self.state == "closed"
+
+    def set_center(self, center: Tuple[float, float], smoothing: float = 1.0) -> None:
+        """Move the portal, optionally easing toward the new position so a
+        carried portal trails slightly behind a fast-moving fingertip
+        instead of teleporting frame to frame.
+        """
+        cx = self.center[0] + (center[0] - self.center[0]) * smoothing
+        cy = self.center[1] + (center[1] - self.center[1]) * smoothing
+        self.center = (cx, cy)
+
+    def update(self, dt: float, speed_deg: float, size_smoothing: float = 0.2) -> None:
         self.rotation += math.radians(speed_deg) * dt
 
+        target = self.radius if self.state in ("opening", "open") else 0.0
+        # snappier than a fixed-alpha lerp so open/close reliably finish
+        ease = min(1.0, size_smoothing + dt * 3.0)
+        self.current_radius += (target - self.current_radius) * ease
+
+        if self.state == "opening" and abs(self.radius - self.current_radius) < 1.5:
+            self.state = "open"
+        elif self.state == "closing" and self.current_radius < 1.5:
+            self.current_radius = 0.0
+            self.state = "closed"
+
     def draw(self, layer: np.ndarray) -> None:
+        if self.current_radius < 2:
+            return
         cx, cy = self.center
+        r = self.current_radius
         # Outer ring
-        draw_glow_arc(layer, self.center, self.radius, math.degrees(self.rotation), math.degrees(self.rotation) + 300, self.color_a, thickness=4, intensity=1.0)
+        draw_glow_arc(layer, self.center, r, math.degrees(self.rotation), math.degrees(self.rotation) + 300, self.color_a, thickness=4, intensity=1.0)
         # Inner counter-rotating ring
-        draw_glow_arc(layer, self.center, self.radius * 0.7, -math.degrees(self.rotation) * 1.4, -math.degrees(self.rotation) * 1.4 + 260, self.color_b, thickness=3, intensity=0.9)
+        draw_glow_arc(layer, self.center, r * 0.7, -math.degrees(self.rotation) * 1.4, -math.degrees(self.rotation) * 1.4 + 260, self.color_b, thickness=3, intensity=0.9)
         # Swirling spiral arms for the "event horizon" feel
         for arm in range(3):
             pts = []
@@ -252,11 +302,11 @@ class Portal:
             for i in range(24):
                 t = i / 23
                 ang = self.rotation * 2 + arm_offset + t * math.pi * 1.6
-                rad = self.radius * (0.15 + 0.85 * t)
+                rad = r * (0.15 + 0.85 * t)
                 pts.append((cx + math.cos(ang) * rad, cy + math.sin(ang) * rad))
             draw_glow_polyline(layer, pts, self.color_a, thickness=2, intensity=0.7 * (1 - arm * 0.2))
         # Bright core
-        draw_glow_circle(layer, self.center, self.radius * 0.18, (255, 255, 255), intensity=0.8, filled=True)
+        draw_glow_circle(layer, self.center, r * 0.18, (255, 255, 255), intensity=0.8, filled=True)
 
 
 @dataclass

@@ -143,6 +143,46 @@ class SpellConfig:
 
 
 # --------------------------------------------------------------------------- #
+# Finger-drawn "sling ring" portal gesture
+# --------------------------------------------------------------------------- #
+@dataclass
+class CircleTraceConfig:
+    """Tuning for detecting a hand-drawn circle (index fingertip tracing a
+    loop in the air), Doctor-Strange-Sling-Ring style. When detected, a
+    portal opens at the traced location and follows that hand around.
+    """
+    # how far back (seconds) we look at fingertip history when checking
+    # for a completed loop
+    history_duration: float = 1.6
+    min_points: int = 12
+
+    # the traced path's cumulative angle must sweep at least this many
+    # degrees around its own centroid to count as "a circle"
+    min_total_angle_deg: float = 300.0
+    # ...and it must be a clean single-direction sweep, not a scribble.
+    # net_angle / total_angle must exceed this ratio.
+    min_direction_consistency: float = 0.75
+
+    # the traced loop's radius (px) must fall in this range
+    min_radius_px: float = 30.0
+    max_radius_px: float = 260.0
+    # how "circular" (vs. lumpy/oval) the path must be: std(radius)/mean(radius)
+    max_radius_variation_ratio: float = 0.55
+    # start point and end point of the trace must be within this fraction
+    # of the mean radius of each other (i.e. the loop actually closes)
+    max_closure_ratio: float = 0.6
+
+    # can't re-trigger on the same hand again within this window
+    cooldown_seconds: float = 1.0
+
+    # how quickly an opened portal's position eases toward the fingertip
+    # as you carry it around
+    drag_smoothing: float = 0.22
+    # how quickly the portal grows in / shrinks out
+    open_close_smoothing: float = 0.20
+
+
+# --------------------------------------------------------------------------- #
 # Bloom / post-processing
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -162,6 +202,7 @@ class AppConfig:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     gesture: GestureConfig = field(default_factory=GestureConfig)
     circle: MagicCircleConfig = field(default_factory=MagicCircleConfig)
+    circle_trace: CircleTraceConfig = field(default_factory=CircleTraceConfig)
     particles: ParticleConfig = field(default_factory=ParticleConfig)
     spell: SpellConfig = field(default_factory=SpellConfig)
     bloom: BloomConfig = field(default_factory=BloomConfig)
